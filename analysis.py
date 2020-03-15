@@ -153,7 +153,7 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
         print("Starting process for: " + filename)
         try:
             #read in the novel specified as a string
-            f = open(os.path.join(os.getcwd(), 'novels', filename), 'r')
+            f = open(os.path.join(novels_dir, filename), 'r')
             novel = f.read()
             f.close()
 
