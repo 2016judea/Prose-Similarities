@@ -52,6 +52,95 @@ import networkx as nx
 from itertools import combinations
 import matplotlib.pyplot as plt
 
+def sentiment_multiple_novels(target_novels, parts):
+    """Compare list of novels at certain granularity (parts)
+    
+    Arguments:
+        target_novels {[string]} -- [list of absolute paths to novels]
+        parts {[int]} -- [granularity to compare novels at]
+    """
+    for novel in target_novels:
+        sentiment_value, sentiment_position = sentiment_analysis(novel, split=parts, show_graph=False)
+        plt.plot(sentiment_position, sentiment_value, label='{novel}'.format(novel=os.path.basename(novel)))
+    
+    plt.xlabel('Portion of Novel')
+    plt.ylabel('Sentiment')
+    plt.legend(loc='best')
+    plt.show()
+
+
+def sentiment_by_parts(target_novel, scale, jump):
+    """View sentiment of novel split into different portions
+    
+    Arguments:
+        target_novel {[string]} -- [absolute os path to target novel]
+        scale {[int]} -- [range of analysis]
+        jump {[int]} -- [how much to jump between portion analysis]
+    """
+    for x in range(2, scale+1, jump):
+        sentiment_value, sentiment_position = sentiment_analysis(target_novel, split=x, show_graph=False)
+        # rescale the points on graph by factor we are ranging through
+        factor = scale / x
+        for i in range(1, len(sentiment_position)):
+            sentiment_position[i] = factor * sentiment_position[i]
+        plt.plot(sentiment_position, sentiment_value, label='{x} parts'.format(x=x))
+    
+    plt.xlabel('Portion of Novel')
+    plt.ylabel('Sentiment')
+    plt.legend(loc='best')
+    plt.show()
+
+
+def sentiment_analysis(target_novel, split='paragraphs', show_graph=False):
+    """Perform sentiment analysis on some novel
+    
+    Arguments:
+        target_novel {[string]} -- [absolute os path to novel text file]
+        split {[string or int]} -- [options: 'paragraphs', some number to times to slice]
+    """
+    f = open(target_novel, 'r')
+    novel_as_string = f.read()
+    f.close()
+
+    if not str(split).isnumeric() and split == 'paragraphs':
+        segments = novel_as_string.split("\n\n")
+    
+    elif str(split).isnumeric():
+        segments = list()
+        portion = int(len(novel_as_string) / split)
+        start = 0
+        end = portion
+        for part in range(1, split+1):
+            segments.append(novel_as_string[start:end])
+            start = end
+            end = end + portion
+    
+    else:
+        print('You did not enter a valid sentiment slicing action')
+        return
+    
+    sentiment_value = []
+    sentiment_position = []
+    x = 0
+
+    for segment in segments:
+        x += 1
+        #utilize TextBlob for NLP
+        blob = TextBlob(segment)
+        sentiment_value.append(blob.sentiment.polarity)
+        sentiment_position.append(x)
+        #delete TextBlob object for sake of OS efficiency
+        del blob
+
+    if show_graph:
+        plt.plot(sentiment_position, sentiment_value)
+        plt.xlabel('Portion of Novel')
+        plt.ylabel('Sentiment')
+        plt.show()
+
+    return(sentiment_value, sentiment_position)
+
+
 def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
     #dict to track words and frequency count
     word_cnt = {}
