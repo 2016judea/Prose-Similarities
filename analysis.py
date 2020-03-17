@@ -51,6 +51,28 @@ import collections
 import networkx as nx
 from itertools import combinations
 import matplotlib.pyplot as plt
+import re
+
+def get_cleaned_word(to_fix):
+    valid = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+                'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+     
+    ret = '' 
+    for char in to_fix:
+        if char.upper() in valid:
+            ret += char
+    
+    return ret
+
+def check_regular_chars(test): 
+    valid = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
+                'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']
+     
+    for char in test:
+        if char.upper() not in valid:
+            return False
+    
+    return True
 
 def sentiment_multiple_novels(target_novels, parts):
     """Compare list of novels at certain granularity (parts)
@@ -161,9 +183,9 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
             blob = TextBlob(novel)
             for word, tag in blob.tags:
                 #if the word is an adjective
-                if tag in ['JJ']:    
+                if tag in ['JJ', 'JJR', 'JJS', 'NN', 'NNS'] and check_regular_chars(word):    
                     #get frequency of word and throw into a dict or tuple
-                    word_cnt.update({word : blob.word_counts[word]})
+                    word_cnt.update({word.upper() : blob.word_counts[word]})
             #delete TextBlob object for sake of OS efficiency
             del blob
         
@@ -171,8 +193,8 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
             sorted_obj = sorted(word_cnt.items(), key=lambda kv: kv[1], reverse=True)
             #throw back into a dict object
             sorted_dict = collections.OrderedDict(sorted_obj)
-            #once we throw into list we can subscript the object for top 300
-            most_used = list(sorted_dict)[:300]
+            #once we throw into list we can subscript the object if need be
+            most_used = list(sorted_dict)
             #throw the novel and the list object of most used words into dict
             novel_most_used.update({filename : most_used})
 
@@ -182,19 +204,46 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
         except UnicodeDecodeError as e:
             print("Cannot decode text from: " + filename)
             print("Skipping this novel due to error\n")
-
+    
     #get a list of all the combinations of novels, these will serve as the graph edges
     graph_edges = combinations(list(novel_most_used.keys()), 2)
-    
+
+    # find all the words/identifiers that are shared among all the novels
+    all_overlap = None
+    for edge in graph_edges:
+        set_1 = set(novel_most_used[edge[0]])
+        set_2 = set(novel_most_used[edge[1]])
+        curr_overlap = set_1 & set_2
+
+        if all_overlap is None:
+            all_overlap = curr_overlap
+        else:
+            all_overlap = all_overlap & curr_overlap
+
+    # remove the common overlap from all novels from each 
+    for novel in novel_most_used:
+        for i in list(all_overlap): 
+            try: 
+                novel_most_used[novel].remove(i)
+            except ValueError: 
+                pass
+        # limit each novel to the most used identifiers/words
+        novel_most_used[novel] = novel_most_used[novel][:100]
+
+    # have to re-init this object this combinations returns an iterator
+    graph_edges = combinations(list(novel_most_used.keys()), 2)
+
     for edge in graph_edges:
         set_1 = set(novel_most_used[edge[0]])
         set_2 = set(novel_most_used[edge[1]])
 
+        # TODO: Find way to weight matches of similar commonality as higher (both appear very often in each, then this
+        #       should weight more than just simply appearing in both books)
         overlap = set_1 & set_2
+
         #we take the number of matches between the sets and divide by the length of the set
-        match_rate = float(len(overlap)) / len(set_1)
-        #nodes that have higher similarity should reflect less of an edge weight (less cost to get to)
-        edge_weight = round(1 - match_rate, 2)
+        match_rate = float(len(overlap)) / (len(set_1) + len(set_2) / 2)
+        edge_weight = round(match_rate, 2)
 
         #add edge to graph
         G.add_edge(str(edge[0]), str(edge[1]), weight=edge_weight)

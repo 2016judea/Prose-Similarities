@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 def main():
 
-    #graph = build_likeness_graph(os.path.join(os.getcwd(), 'novels', 'fitzgerald'), show_graph=True, shortest_path=False)
+    graph = build_likeness_graph(os.path.join(os.getcwd(), 'novels', 'testing'), show_graph=True, shortest_path=False)
 
     
     #sentiment_by_parts(os.path.join(os.getcwd(), 'novels', 'ThisSideOfParadise.txt'), scale=4, jump=2)
@@ -25,7 +25,7 @@ def main():
         os.path.join(os.getcwd(), 'novels', 'fitzgerald', 'TenderIsTheNight.txt')
     ]
 
-    sentiment_multiple_novels(novels_to_compare, 6)
+    #sentiment_multiple_novels(novels_to_compare, 6)
 
 if __name__ == "__main__":
     main()
