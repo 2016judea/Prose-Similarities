@@ -168,6 +168,8 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
     word_cnt = {}
     #dict to track novel and most used word list objects
     novel_most_used = {}
+    # dict to track total word count per novel
+    novel_word_cnt = {}
     #generate an undirected graph using the networkx library
     G = nx.Graph()
 
@@ -175,28 +177,33 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
         print("Starting process for: " + filename)
         try:
             #read in the novel specified as a string
-            f = open(os.path.join(novels_dir, filename), 'r')
+            f = open(os.path.join(novels_dir, filename), 'r', errors='ignore')
             novel = f.read()
             f.close()
+            total_word_cnt = 0
+            relevant_pos_tags = ['JJ', 'JJR', 'JJS', 'NN', 'NNS', 'MD', 'PDT', 'PRP$', 'RB', 
+                                    'RBR', 'RBS', 'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ']
 
             #utilize TextBlob for NLP
             blob = TextBlob(novel)
             for word, tag in blob.tags:
-                #if the word is an adjective
-                if tag in ['JJ', 'JJR', 'JJS', 'NN', 'NNS'] and check_regular_chars(word):    
-                    #get frequency of word and throw into a dict or tuple
+                total_word_cnt += 1
+                if tag in relevant_pos_tags and check_regular_chars(word):   
                     word_cnt.update({word.upper() : blob.word_counts[word]})
-            #delete TextBlob object for sake of OS efficiency
-            del blob
         
             #take object and sort based on frequency
             sorted_obj = sorted(word_cnt.items(), key=lambda kv: kv[1], reverse=True)
-            #throw back into a dict object
+            #throw into ordered dict and remove words of minimal frequency
             sorted_dict = collections.OrderedDict(sorted_obj)
-            #once we throw into list we can subscript the object if need be
-            most_used = list(sorted_dict)
-            #throw the novel and the list object of most used words into dict
-            novel_most_used.update({filename : most_used})
+            sorted_dict = {x:y for x,y in sorted_dict.items() if y!=0}
+            # general most used, without frequency
+            novel_most_used.update({filename: sorted_dict})
+            # word count for novels
+            novel_word_cnt.update({filename: total_word_cnt})
+
+            del blob
+            del word_cnt
+            word_cnt = {}
 
             #add node to graph
             G.add_node(filename)
@@ -208,54 +215,136 @@ def build_likeness_graph(novels_dir, show_graph=False, shortest_path=False):
     #get a list of all the combinations of novels, these will serve as the graph edges
     graph_edges = combinations(list(novel_most_used.keys()), 2)
 
+    
     # find all the words/identifiers that are shared among all the novels
-    all_overlap = None
-    for edge in graph_edges:
-        set_1 = set(novel_most_used[edge[0]])
-        set_2 = set(novel_most_used[edge[1]])
-        curr_overlap = set_1 & set_2
+    def remove_all_overlaps(graph_edges, novel_most_used):
+        all_overlap = None
+        for edge in graph_edges:
+            set_1 = set(novel_most_used[edge[0]].keys())
+            set_2 = set(novel_most_used[edge[1]].keys())
+            curr_overlap = set_1 & set_2
 
-        if all_overlap is None:
-            all_overlap = curr_overlap
-        else:
-            all_overlap = all_overlap & curr_overlap
+            if all_overlap is None:
+                all_overlap = curr_overlap
+            else:
+                all_overlap = all_overlap & curr_overlap
 
-    # remove the common overlap from all novels from each 
-    for novel in novel_most_used:
-        for i in list(all_overlap): 
-            try: 
-                novel_most_used[novel].remove(i)
-            except ValueError: 
-                pass
-        # limit each novel to the most used identifiers/words
-        novel_most_used[novel] = novel_most_used[novel][:100]
+        # remove the common overlap from all novels from each 
+        for novel in novel_most_used:
+            for i in list(all_overlap): 
+                try: 
+                    novel_most_used[novel].pop(i)
+                except ValueError: 
+                    pass
+
+
+    # limit most used words per novel
+    def limit_number_words(novel_most_used, N=None, cap_at_max=False, display_words=False):
+        if cap_at_max:
+            max_across = float("inf")
+            for novel in novel_most_used:
+                max_across = min(max_across, len(novel_most_used[novel]))
+        
+        for novel in novel_most_used:
+            if cap_at_max:
+                novel_most_used[novel] = dict(list(novel_most_used[novel].items())[0: max_across])
+            else:
+                novel_most_used[novel] = dict(list(novel_most_used[novel].items())[0: N])
+            
+            if display_words:
+                print('Novel: ' + str(novel) + str(novel_most_used[novel]))
+
+    
+    def simple_overlap(most_used_1, most_used_2, tolerance):
+        set_1 = set(most_used_1.keys())
+        set_2 = set(most_used_2.keys())
+        
+        overlap = set_1 & set_2
+        #we take the number of matches between the sets and divide by the average length of the sets
+        match_rate = float(len(overlap)) / (len(set_1) + len(set_2) / 2)
+        edge_weight = round(match_rate, tolerance)
+        
+        return edge_weight  #larger this number, the more similar
+
+    
+    def linear_weight_overlap(most_used_1, most_used_2, word_cnt_1, word_cnt_2, tolerance):
+        set_1 = set(most_used_1.keys())
+        set_2 = set(most_used_2.keys())
+        
+        overlap = set_1 & set_2
+        overlap_weight = 0
+        matches = dict()
+
+        for match in overlap:
+            freq_1 = most_used_1[match] / word_cnt_1
+            freq_2 = most_used_2[match] / word_cnt_2
+            weight = ((10**-10) / abs(freq_1 - freq_2))
+            overlap_weight += weight
+            matches.update({match: weight})
+
+        edge_weight = round(overlap_weight, tolerance)
+        matches = sorted(matches.items(), key=lambda kv: kv[1], reverse=True)[0: 10]
+        top_matches = list()
+        for word, weight in matches:
+            top_matches.append(word)
+        
+        return edge_weight, top_matches  #larger the edge weight, the more similar
+
+
+    def exponential_weight_overlap(most_used_1, most_used_2, word_cnt_1, word_cnt_2, tolerance, factor):
+        set_1 = set(most_used_1.keys())
+        set_2 = set(most_used_2.keys())
+        
+        overlap = set_1 & set_2
+        overlap_weight = 0
+        matches = dict()
+
+        for match in overlap:
+            freq_1 = most_used_1[match] / word_cnt_1
+            freq_2 = most_used_2[match] / word_cnt_2
+            weight = ((10**-10) / (abs(freq_1 - freq_2)**factor))
+            overlap_weight += weight
+            matches.update({match: weight})
+
+        edge_weight = round(overlap_weight, tolerance)
+        matches = sorted(matches.items(), key=lambda kv: kv[1], reverse=True)[0: 10]
+        top_matches = list()
+        for word, weight in matches:
+            top_matches.append(word)
+        
+        return edge_weight, top_matches  #larger the edge weight, the more similar
+
+
+    remove_all_overlaps(graph_edges, novel_most_used)
+    limit_number_words(novel_most_used, N=500, cap_at_max=True, display_words=False)
 
     # have to re-init this object this combinations returns an iterator
     graph_edges = combinations(list(novel_most_used.keys()), 2)
-
+    print("\nNovels & Similarity Weights:\n")
+    
     for edge in graph_edges:
-        set_1 = set(novel_most_used[edge[0]])
-        set_2 = set(novel_most_used[edge[1]])
+        most_used_1 = novel_most_used[edge[0]]
+        most_used_2 = novel_most_used[edge[1]]
+        word_cnt_1 = novel_word_cnt[edge[0]]
+        word_cnt_2 = novel_word_cnt[edge[1]]
+        
+        #edge_weight = simple_overlap(most_used_1, most_used_2, 3)
+        #edge_weight, top_matches = linear_weight_overlap(most_used_1, most_used_2, word_cnt_1, word_cnt_2, tolerance=5)
+        edge_weight, top_matches = exponential_weight_overlap(most_used_1, most_used_2, word_cnt_1, word_cnt_2, tolerance=3, factor=2)
 
-        # TODO: Find way to weight matches of similar commonality as higher (both appear very often in each, then this
-        #       should weight more than just simply appearing in both books)
-        overlap = set_1 & set_2
-
-        #we take the number of matches between the sets and divide by the length of the set
-        match_rate = float(len(overlap)) / (len(set_1) + len(set_2) / 2)
-        edge_weight = round(match_rate, 2)
-
-        #add edge to graph
+        #add edge to graph & print results
         G.add_edge(str(edge[0]), str(edge[1]), weight=edge_weight)
+        print(str(edge[0]) + ' <--> ' + str(edge[1]) +  ' = ' + str(edge_weight))
+        if top_matches:
+            print('    Top Matches: ' + str(top_matches))
+        print('\n')
 
     if show_graph:
         pos = nx.spring_layout(G)
         edge_labels = nx.get_edge_attributes(G,'weight')
         node_labels = nx.get_node_attributes(G, 'name')
-        #draw edges
         nx.draw_networkx_edges(G, pos=pos)
         nx.draw_networkx_edge_labels(G, pos=pos, edge_labels=edge_labels, nodecolor='r', edge_color='b')
-        #draw nodes
         nx.draw_networkx_nodes(G,pos,node_size=3500)
         nx.draw_networkx_labels(G, pos=pos, node_labels=node_labels, nodecolor='r', edge_color='b', font_size=6)
         plt.show()
